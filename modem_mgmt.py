@@ -326,6 +326,70 @@ def process_identity4_response(response):
     safe_mqtt_publish("cellular/identity", "4", 0, True)
     latest_status_values["identity"] = 4
 
+# Process User Setting LTE Mode Response
+def process_mode_lte_response(response):
+    safe_mqtt_publish("cellular/usermode", "LTE", 0, True)
+    latest_status_values["usermode"] = "LTE"
+
+# Process User Setting Auto-Auto Mode Response
+def process_mode_fullauto_response(response):
+    safe_mqtt_publish("cellular/usermode", "Full Auto", 0, True)
+    latest_status_values["usermode"] = "Full Auto"
+
+# Process User Setting Auto-5GSA Mode Response
+def process_mode_auto_5gsa_response(response):
+    safe_mqtt_publish("cellular/usermode", "Auto - 5G SA", 0, True)
+    latest_status_values["usermode"] = "Auto - 5G SA"
+
+# Process User Setting Auto-5GNSA Mode Response
+def process_mode_auto_5gnsa_response(response):
+    safe_mqtt_publish("cellular/usermode", "Auto - 5G NSA", 0, True)
+    latest_status_values["usermode"] = "Auto - 5G NSA"
+
+# Process User Setting 5GSAOnly Mode Response
+def process_mode_5g_sa_response(response):
+    safe_mqtt_publish("cellular/usermode", "5G SA", 0, True)
+    latest_status_values["usermode"] = "5G SA"
+
+# Process User Setting 5GNSAOnly Mode Response
+def process_mode_5g_nsa_response(response):
+    safe_mqtt_publish("cellular/usermode", "5G NSA", 0, True)
+    latest_status_values["usermode"] = "5G NSA"
+
+# Process User Setting 5G Auto Mode Response
+def process_mode_5g_auto_response(response):
+    safe_mqtt_publish("cellular/usermode", "5G Auto", 0, True)
+    latest_status_values["usermode"] = "5G Auto"
+
+# Process User Setting LTE Mode
+def modem_mode_lte():
+    command_queue.put(('AT', ser, 10, process_mode_lte_response))
+
+# Process User Setting Full Auto Mode
+def modem_mode_fullauto():
+    command_queue.put(('AT', ser, 10, process_mode_fullauto_response))
+
+# Process User Setting Auto - 5g SA Mode
+def modem_mode_auto_5gsa():
+    command_queue.put(('AT', ser, 10, process_mode_auto_5gnsa_response))
+
+# Process User Setting Auto - 5g NSA Mode
+def modem_mode_auto_5gnsa():
+    command_queue.put(('AT', ser, 10, process_mode_auto_5gsa_response))
+
+# Process User Setting 5G Auto Mode
+def modem_mode_5g_auto():
+    command_queue.put(('AT', ser, 10, process_mode_5g_auto_response))
+
+# Process User Setting 5G Only - SA Mode
+def modem_mode_5g_sa():
+    command_queue.put(('AT', ser, 10, process_mode_5g_sa_response))
+
+# Process User Setting 5G Only - NSA Mode
+def modem_mode_5g_nsa():
+    command_queue.put(('AT', ser, 10, process_mode_5g_nsa_response))
+
+
 # Process the AT+COPS response for network operator
 def process_cops_response(response):
     match = re.search(r'\+COPS: (\d+),(\d+),\"(.+)\",(\d+)', response)
@@ -524,6 +588,20 @@ def handle_network_scan(scan_type):
 
     # perform network scan based on scan_type
     perform_network_scan(scan_type)
+
+@socketio.on('mode')
+def handle_modem_mode(mode):
+    action_map = {
+        "LTE" : modem_mode_lte,
+        "Auto-Auto" : modem_mode_fullauto,
+        "Auto-SA" : modem_mode_auto_5gsa,
+        "Auto-NSA" : modem_mode_auto_5gnsa,
+        "5G-SA" : modem_mode_5g_sa,
+        "5G-NSA" : modem_mode_5g_nsa,
+        "5G-Auto": modem_mode_5g_auto,
+    }
+    action=action_map.get(mode, "Invalid mode")
+    action()
 
 @socketio.on('join')
 def on_join(data):
