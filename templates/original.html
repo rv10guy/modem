@@ -271,7 +271,8 @@
             });
 
             socket.on('locked_bands', function(bands) {
-                for (var band_type in bands) {
+                console.log(bands)
+		for (var band_type in bands) {
                     if (bands.hasOwnProperty(band_type)) {
                         var bandSet = new Set(bands[band_type]); // Here, bands[band_type] is already a list
                         var bandDiv = document.getElementById(band_type);

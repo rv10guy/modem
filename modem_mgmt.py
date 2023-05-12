@@ -310,21 +310,25 @@ def process_apn_response(response):
 def process_identity1_response(response):
     safe_mqtt_publish("cellular/identity", "1", 0, True)
     latest_status_values["identity"] = 1
+    safe_socketio_emit('identity', "Identity 1")
 
 # Process Identity Response 2    
 def process_identity2_response(response):
     safe_mqtt_publish("cellular/identity", "2", 0, True)
     latest_status_values["identity"] = 2
+    safe_socketio_emit('identity', "Identity 2")
 
 # Process Identity Response 3
 def process_identity3_response(response):
     safe_mqtt_publish("cellular/identity", "3", 0, True)
     latest_status_values["identity"] = 3
+    safe_socketio_emit('identity', "Identity 3")
 
 # Process Identity Response 4
 def process_identity4_response(response):
     safe_mqtt_publish("cellular/identity", "4", 0, True)
     latest_status_values["identity"] = 4
+    safe_socketio_emit('identity', "Identity 4")
 
 # Process User Setting LTE Mode Response
 def process_mode_lte_response(response):
@@ -364,31 +368,37 @@ def process_mode_5g_auto_response(response):
 # Process User Setting LTE Mode
 def modem_mode_lte():
     command_queue.put(('AT', ser, 10, process_mode_lte_response))
+    safe_socketio_emit('modem_mode', "LTE")
 
 # Process User Setting Full Auto Mode
 def modem_mode_fullauto():
     command_queue.put(('AT', ser, 10, process_mode_fullauto_response))
+    safe_socketio_emit('modem_mode', "Auto-Auto")
 
 # Process User Setting Auto - 5g SA Mode
 def modem_mode_auto_5gsa():
     command_queue.put(('AT', ser, 10, process_mode_auto_5gnsa_response))
+    safe_socketio_emit('modem_mode', "Auto-5GSA")
 
 # Process User Setting Auto - 5g NSA Mode
 def modem_mode_auto_5gnsa():
     command_queue.put(('AT', ser, 10, process_mode_auto_5gsa_response))
+    safe_socketio_emit('modem_mode', "Auto-5GNSA")
 
 # Process User Setting 5G Auto Mode
 def modem_mode_5g_auto():
     command_queue.put(('AT', ser, 10, process_mode_5g_auto_response))
+    safe_socketio_emit('modem_mode', "5G Auto")
 
 # Process User Setting 5G Only - SA Mode
 def modem_mode_5g_sa():
     command_queue.put(('AT', ser, 10, process_mode_5g_sa_response))
+    safe_socketio_emit('modem_mode', "5G SA") 
 
 # Process User Setting 5G Only - NSA Mode
 def modem_mode_5g_nsa():
     command_queue.put(('AT', ser, 10, process_mode_5g_nsa_response))
-
+    safe_socketio_emit('modem_mode', "5G NSA")
 
 # Process the AT+COPS response for network operator
 def process_cops_response(response):
