@@ -180,6 +180,7 @@ def get_carrier(mcc, mnc):
     return None
 
 def process_at_command(response):
+    print(response)
     safe_socketio_emit('display_response', response)
 
 # Scan for available networks

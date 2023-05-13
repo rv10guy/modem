@@ -1,9 +1,430 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <title>AT Command Interface</title>
+    <script src="{{ url_for('static', filename='socket.io.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='jquery-3.6.4.min.js') }}"></script>
+    <style>
+        #command-history {
+            height: 200px;
+            overflow-y: scroll;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-bottom: 20px;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .command-section {
+            margin-top: 20px;
+        }
+
+        .command-section,
+        .status-section {
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+
+        #overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        #overlay-message {
+            font-size: 2rem;
+            color: white;
+        }
+    </style>
 </head>
 <body>
-    <h1>TEST</h1>
-    <p>TEST</p>
+    <div class="container">
+        <div class="status-section">
+            <h1>Cellular Status</h1>
+            <ul>
+                <li>System Mode: <span id="system_mode"></span></li>
+                <li>RSRP: <span id="rsrp"></span></li>
+                <li>RSRQ: <span id="rsrq"></span></li>
+                <li>Signal Strength: <span id="signal_strength"></span></li>
+                <li>Signal Quality: <span id="signal_quality"></span></li>
+                <li>Band: <span id="band"></span></li>
+                <li>Operator: <span id="network_operator"></span></li>
+                <li>IMEI: <span id="imei"></span></li>
+                <li>Registration Status: <span id="registration_status"></span></li>
+                <li>APNs: <span id="apn"></span></li>
+                <li>Phone Number: <span id="phone_number"></span></li>
+                <li>ICCID: <span id="iccid"></span></li>
+                <li>Download Speed: <span id="download-speed"></span></li>
+                <li>Upload Speed: <span id="upload-speed"></span></li>
+                <li>Latency: <span id="latency"></span></li>
+                <li>Last Speedtest: <span id="st-date-time"></span></li>
+                <button id="run-speedtest">Run Speed Test</button>
+                <button id="identity-1">Set Identity 1</button>
+                <button id="identity-2">Set Identity 2</button>
+                <button id="identity-3">Set Identity 3</button>
+                <button id="identity-4">Set Identity 4</button>
+
+            </ul>
+        </div>
+        <hr>
+        <div class="command-section">
+            <h1>AT Command Interface</h1>
+            <form id="command-form">
+                <label for="command">AT Command:</label>
+                <input type="text" id="command" name="command">
+                <button type="submit">Send</button>
+            </form>
+            <h2>Response:</h2>
+            <pre id="response"></pre>
+            <h2>Command History:</h2>
+            <div id="command-history"></div>
+        </div>
+        <hr>
+        <div class="scan-section">
+            <h1>Network Scanning</h1>
+            <form id="scan-form">
+                <label for="scan-type">Scan Type:</label>
+                <select id="scan-type" name="scan-type">
+                    <option value="LTE">LTE</option>
+                    <option value="5G">5G</option>
+                    <option value="Both">Both</option>
+                </select>
+                <button type="submit">Perform Network Scan</button>
+            </form>
+            <div id="waitMessage" style="display: none;">Please wait...</div>
+            <h2>Response:</h2>
+            <pre id="scan-result"></pre>
+        </div>
+        <hr>
+        <div class="bandlocking-section">
+            <h1>Enabled Bands</h1>
+            <form id="bandForm">
+                <h2>LTE Bands</h2>
+                <div id="lte_band">
+                    <input type="checkbox" id="lte_band2" name="lte_band2" value="2">
+                    <label for="lte_band2">Band 2</label>
+                    <input type="checkbox" id="lte_band4" name="lte_band4" value="4">
+                    <label for="lte_band4">Band 4</label>
+                    <input type="checkbox" id="lte_band5" name="lte_band5" value="5">
+                    <label for="lte_band5">Band 5</label>
+                    <input type="checkbox" id="lte_band12" name="lte_band12" value="12">
+                    <label for="lte_band12">Band 12</label>
+                    <input type="checkbox" id="lte_band13" name="lte_band13" value="13">
+                    <label for="lte_band13">Band 13</label>
+                    <input type="checkbox" id="lte_band14" name="lte_band14" value="14">
+                    <label for="lte_band14">Band 14</label>
+                    <input type="checkbox" id="lte_band17" name="lte_band17" value="17">
+                    <label for="lte_band17">Band 17</label>
+                    <input type="checkbox" id="lte_band25" name="lte_band25" value="25">
+                    <label for="lte_band25">Band 25</label>
+                    <input type="checkbox" id="lte_band26" name="lte_band26" value="26">
+                    <label for="lte_band26">Band 26</label>
+                    <input type="checkbox" id="lte_band29" name="lte_band29" value="29">
+                    <label for="lte_band29">Band 29</label>
+                    <input type="checkbox" id="lte_band30" name="lte_band30" value="30">
+                    <label for="lte_band30">Band 30</label>
+                    <input type="checkbox" id="lte_band41" name="lte_band41" value="41">
+                    <label for="lte_band41">Band 41</label>
+                    <input type="checkbox" id="lte_band46" name="lte_band46" value="46">
+                    <label for="lte_band46">Band 46</label>
+                    <input type="checkbox" id="lte_band48" name="lte_band48" value="48">
+                    <label for="lte_band48">Band 48</label>
+                    <input type="checkbox" id="lte_band66" name="lte_band66" value="66">
+                    <label for="lte_band66">Band 66</label>
+                    <input type="checkbox" id="lte_band71" name="lte_band71" value="71">
+                    <label for="lte_band71">Band 71</label>
+                    <button type="button" id="lte_select_all">Select All</button>
+                    <button type="button" id="lte_deselect_all">Deselect All</button> 
+                </div>
+                <h2>5G Bands</h2>
+                <div id="nr5g_band">
+                    <input type="checkbox" id="nr5g_band2" name="nr5g_band2" value="2">
+                    <label for="nr5g_band2">Band 2</label>
+                    <input type="checkbox" id="nr5g_band5" name="nr5g_band5" value="5">
+                    <label for="nr5g_band5">Band 5</label>
+                    <input type="checkbox" id="nr5g_band12" name="nr5g_band12" value="12">
+                    <label for="nr5g_band12">Band 12</label>
+                    <input type="checkbox" id="nr5g_band25" name="nr5g_band25" value="25">
+                    <label for="nr5g_band25">Band 25</label>
+                    <input type="checkbox" id="nr5g_band41" name="nr5g_band41" value="41">
+                    <label for="nr5g_band41">Band 41</label>
+                    <input type="checkbox" id="nr5g_band48" name="nr5g_band48" value="48">
+                    <label for="nr5g_band48">Band 48</label>
+                    <input type="checkbox" id="nr5g_band66" name="nr5g_band66" value="66">
+                    <label for="nr5g_band66">Band 66</label>
+                    <input type="checkbox" id="nr5g_band71" name="nr5g_band71" value="71">
+                    <label for="nr5g_band71">Band 71</label>
+                    <input type="checkbox" id="nr5g_band77" name="nr5g_band77" value="77">
+                    <label for="nr5g_band77">Band 77</label>
+                    <button type="button" id="nr5g_select_all">Select All</button>
+                    <button type="button" id="nr5g_deselect_all">Deselect All</button>
+                </div>
+                <button type="submit">Submit</button>
+            </form>
+        </div>
+        <div id="overlay">
+            <div id="overlay-message">
+            </div>
+        </div>
+    <script>
+        $(document).ready(function() {
+            // Connect to the Socket.IO server
+            var socket = io.connect('http://' + document.domain + ':' + location.port);
+            console.log('http://' + document.domain + ':' + location.port);
+            socket.on('connect', function() {
+                socket.emit('join', {room: 'global'});
+            });
+            // Listen for events from the server
+            socket.on('cellular/rsrp', function(rsrp) {
+                document.getElementById('rsrp').innerHTML = rsrp;
+            });
+
+            socket.on('cellular/rsrq', function(rsrq) {
+                document.getElementById('rsrq').innerHTML = rsrq;
+            });
+
+            socket.on('cellular/signal_strength', function(signal_strength) {
+                document.getElementById('signal_strength').innerHTML = signal_strength;
+            });
+
+            socket.on('cellular/signal_quality', function(signal_quality) {
+                document.getElementById('signal_quality').innerHTML = signal_quality;
+            });
+
+            socket.on('cellular/system_mode', function(system_mode) {
+                document.getElementById('system_mode').innerHTML = system_mode;
+            });
+
+            socket.on('cellular/band', function(band) {
+                document.getElementById('band').innerHTML = band;
+            });
+
+            socket.on('cellular/network_operator', function(network_operator) {
+                document.getElementById('network_operator').innerHTML = network_operator;
+            });
+
+            socket.on('cellular/imei', function(imei) {
+                document.getElementById('imei').innerHTML = imei;
+            });
+
+            socket.on('cellular/iccid', function(iccid) {
+                document.getElementById('iccid').innerHTML = iccid;
+            });
+
+            socket.on('cellular/registration_status', function(registration_status) {
+                document.getElementById('registration_status').innerHTML = registration_status;
+            });
+
+            socket.on('cellular/apn', function(apn) {
+                document.getElementById('apn').innerHTML = apn;
+            });
+
+            socket.on('cellular/phone_number', function(phone_number) {
+                document.getElementById('phone_number').innerHTML = phone_number;
+            });
+
+            // Submit AT command form
+            $('#command-form').submit(function(e) {
+                e.preventDefault();
+                var command = $('#command').val();
+                // Clear the response
+                $('#response').text('');
+                // Emit the send_command event
+                socket.emit('send_command', command);
+                // Append the command to the command history
+                $('#command-history').append('<p><strong>Command:</strong> ' + command + '</p>');
+                // Keep the last command in the input field
+                $('#command').val(command);
+            });
+
+            $('#scan-form').submit(function(e) {
+                e.preventDefault();
+                var scan_type = $('#scan-type').val();
+                socket.emit('network_scan', scan_type);
+            });
+
+            // Display response from AT command
+            socket.on('display_response', function(response) {
+                $('#response').text(response);
+                // Append the response to the command history
+                $('#command-history').append('<p><strong>Response:</strong> ' + response + '</p>');
+            });
+
+            socket.on('network_scanning', function(data) {
+                if (data.status) {
+                    $('#waitMessage').show();
+                } else {
+                    $('#waitMessage').hide();
+                }
+            });
+
+            socket.on('locked_bands', function(bands) {
+                console.log(bands)
+		for (var band_type in bands) {
+                    if (bands.hasOwnProperty(band_type)) {
+                        var bandSet = new Set(bands[band_type]); // Here, bands[band_type] is already a list
+                        var bandDiv = document.getElementById(band_type);
+                        if (bandDiv) {
+                            var checkboxes = bandDiv.getElementsByTagName('input');
+                            for (var i = 0; i < checkboxes.length; i++) {
+                                if (checkboxes[i].type == 'checkbox') {
+                                    var bandNum = checkboxes[i].value;
+                                    checkboxes[i].checked = bandSet.has(bandNum);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            socket.on('show_overlay', function(data) {
+                console.log('Received show_overlay:', data); // Debugging line
+                document.getElementById('overlay-message').innerHTML = data.message;
+                document.getElementById('overlay').style.display = 'flex';
+            });
+
+            socket.on('hide_overlay', function() {
+                document.getElementById('overlay').style.display = 'none';
+            });
+
+            socket.on('network_scan_result', function(response) {
+                // Check if table already exists, if yes remove it
+                var existingTable = document.getElementById('networkTable');
+                if (existingTable) existingTable.remove();
+
+                var table = document.createElement('table');
+                table.id = 'networkTable'; // Set id for the table
+                var thead = document.createElement('thead');
+                var tbody = document.createElement('tbody');
+                var headRow = document.createElement('tr');
+
+                ["Carrier", "Network Type", "Band", "RSRP", "RSRQ"].forEach(function(el) {
+                    var th = document.createElement('th');
+                    th.appendChild(document.createTextNode(el));
+                    headRow.appendChild(th);
+                });
+
+                thead.appendChild(headRow);
+                table.appendChild(thead);
+
+                response.forEach(function(el) {
+                    var tr = document.createElement('tr');
+                    for (var o in el) {
+                        var td = document.createElement('td');
+                        td.appendChild(document.createTextNode(el[o]))
+                        tr.appendChild(td);
+                    }
+                    tbody.appendChild(tr);
+                });
+
+                table.appendChild(tbody);
+                var tableContainer = document.getElementById('scan-result');
+                tableContainer.appendChild(table);
+            });
+
+            document.getElementById('bandForm').addEventListener('submit', function(event) {
+                event.preventDefault();  // prevent the form from being submitted normally
+
+                var selectedBands = {
+                    "lte_band": [],
+                    "nr5g_band": [],
+                    // add here other band types
+                };
+
+                // Loop over each type of band
+                for (var band_type in selectedBands) {
+                    // Get all checkboxes for that band type
+                    var checkboxes = document.querySelectorAll(`input[id^=${band_type}]`);
+                    for (var i = 0; i < checkboxes.length; i++) {
+                        if (checkboxes[i].checked) {
+                            // Add the band number to the corresponding band type
+                            selectedBands[band_type].push(checkboxes[i].value);
+                        }
+                    }
+                }
+
+                socket.emit('selected_bands', selectedBands);
+            });
+
+            socket.on("speedtest_results", function(results) {
+                // Extract the required data from the results object
+                const downloadSpeed = (results.download / 1000000).toFixed(2); // Convert to Mbps and round to 2 decimal places
+                const uploadSpeed = (results.upload / 1000000).toFixed(2); // Convert to Mbps and round to 2 decimal places
+                const latency = results.ping.toFixed(2);
+                const dateTime = new Date(results.timestamp).toLocaleString();
+                
+                // Display the extracted data on the web page
+                document.getElementById("download-speed").textContent = downloadSpeed;
+                document.getElementById("upload-speed").textContent = uploadSpeed;
+                document.getElementById("latency").textContent = latency;
+                document.getElementById("st-date-time").textContent = dateTime;
+            });
+
+
+            document.getElementById("identity-1").addEventListener("click", function() {
+                socket.emit("identity-1");
+            });
+
+            document.getElementById("identity-2").addEventListener("click", function() {
+                socket.emit("identity-2");
+            });
+
+            document.getElementById("identity-3").addEventListener("click", function() {
+                socket.emit("identity-3");
+            });
+
+            document.getElementById("identity-4").addEventListener("click", function() {
+                socket.emit("identity-4");
+            });
+
+            document.getElementById("run-speedtest").addEventListener("click", function() {
+                socket.emit("run_speedtest");
+            });
+
+        
+            function selectAllCheckboxes(containerId, check) {
+                var container = document.getElementById(containerId);
+                var checkboxes = container.querySelectorAll("input[type='checkbox']");
+                checkboxes.forEach(function(checkbox) {
+                    checkbox.checked = check;
+                });
+            }
+
+            document.getElementById("lte_select_all").addEventListener("click", function() {
+                selectAllCheckboxes("lte_band", true);
+            });
+
+            document.getElementById("lte_deselect_all").addEventListener("click", function() {
+                selectAllCheckboxes("lte_band", false);
+            });
+
+            document.getElementById("nr5g_select_all").addEventListener("click", function() {
+                selectAllCheckboxes("nr5g_band", true);
+            });
+
+            document.getElementById("nr5g_deselect_all").addEventListener("click", function() {
+                selectAllCheckboxes("nr5g_band", false);
+            });
+
+            function addCommandToHistory(command, response) {
+                var commandHistory = $('#command-history');
+                commandHistory.append('<p><strong>Command:</strong> ' + command + '</p>');
+                commandHistory.append('<p><strong>Response:</strong> ' + response + '</p>');
+                commandHistory.scrollTop(commandHistory.prop('scrollHeight'));
+            }
+        });
+    </script>
 </body>
 </html>
