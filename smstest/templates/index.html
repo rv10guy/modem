@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GSM Modem Interface</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.2.0/socket.io.js"></script>
+    <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
+</head>
+<body>
+    <h1>GSM Modem Interface</h1>
+
+    <h2>Send Message</h2>
+    <form id="send-form">
+        <label for="number">Number:</label><br>
+        <input type="text" id="number" name="number"><br>
+        <label for="text">Message:</label><br>
+        <textarea id="text" name="text"></textarea><br>
+        <input type="submit" value="Send">
+    </form>
+
+    <h2>Messages</h2>
+    <button id="refresh-button">Refresh</button>
+    <ul id="messages">
+    </ul>
+
+    <script>
+        const API_URL = 'http://localhost:5000';  // Replace with your API's URL if necessary
+
+        $(document).ready(function() {
+            $('#send-form').submit(function(e) {
+                e.preventDefault();
+                $.post(API_URL + '/messages', {
+                    number: $('#number').val(),
+                    text: $('#text').val()
+                });
+            });
+
+            $('#refresh-button').click(refreshMessages);
+
+            function refreshMessages() {
+                $.get(API_URL + '/messages', function(data) {
+                    $('#messages').empty();
+                    for (let msg of data) {
+                        let li = $('<li>');
+                        li.text(`From ${msg[1]}: ${msg[2]} (${msg[3]})`);
+                        let readButton = $('<button>').text('Mark as Read');
+                        readButton.click(function() {
+                            $.post(API_URL + `/messages/${msg[0]}/read`, refreshMessages);
+                        });
+                        let deleteButton = $('<button>').text('Delete');
+                        deleteButton.click(function() {
+                            $.ajax({
+                                url: API_URL + `/messages/${msg[0]}`,
+                                type: 'DELETE',
+                                success: refreshMessages
+                            });
+                        });
+                        li.append(readButton);
+                        li.append(deleteButton);
+                        $('#messages').append(li);
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
