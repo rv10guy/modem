@@ -178,6 +178,27 @@
             <div id="overlay-message">
             </div>
         </div>
+        <h2>SMS Manager</h2>
+
+        <table id="messageTable">
+            <tr>
+                <th>Index</th>
+                <th>Number</th>
+                <th>Text</th>
+                <th>Time</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+            <!-- Messages will be inserted here -->
+        </table>
+
+        <h3>Send Message</h3>
+        <form id="sendMessageForm">
+            Number: <input type="text" id="number"><br>
+            <br>
+            Message: <input type="text" id="message"><br>
+            <input type="submit" value="Send">
+        </form>    
     <script>
         $(document).ready(function() {
             // Connect to the Socket.IO server
@@ -187,6 +208,11 @@
                 socket.emit('join', {room: 'global'});
             });
             // Listen for events from the server
+            socket.on('messages', function(messages) {
+            console.log('Received messages:', messages);
+            updateMessagesTable(messages);
+            });
+
             socket.on('cellular/rsrp', function(rsrp) {
                 document.getElementById('rsrp').innerHTML = rsrp;
             });
@@ -425,6 +451,61 @@
                 commandHistory.scrollTop(commandHistory.prop('scrollHeight'));
             }
         });
+        document.getElementById('sendMessageForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            var number = document.getElementById('number').value;
+            var message = document.getElementById('message').value;
+            fetch('/api/sms', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({number: number, message: message}),
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Message sent:', data);
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+            });
+        });
+
+        function updateMessagesTable(messages) {
+            var table = document.getElementById('messageTable');
+            // Clear the table
+            table.innerHTML = '<tr><th>Index</th><th>Number</th><th>Text</th><th>Time</th><th>Status</th><th>Actions</th></tr>';
+            // Add each message to the table
+            messages.forEach(function(msg) {
+                var row = table.insertRow(-1);
+                row.insertCell(0).innerText = msg.index;
+                row.insertCell(1).innerText = msg.number;
+                row.insertCell(2).innerText = msg.text;
+                row.insertCell(3).innerText = msg.time;
+                row.insertCell(4).innerText = msg.status;
+                var actionsCell = row.insertCell(5);
+                var deleteButton = document.createElement('button');
+                deleteButton.innerText = 'Delete';
+                deleteButton.addEventListener('click', function() {
+                    deleteMessage(msg.index);
+                });
+                actionsCell.appendChild(deleteButton);
+            });
+        }
+
+        function deleteMessage(index) {
+            fetch('/api/sms/' + index, {
+                method: 'DELETE',
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Deleted:', data);
+                refreshMessages();
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+            });
+        }
     </script>
 </body>
 </html>
