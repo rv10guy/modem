@@ -105,6 +105,11 @@ def mqtt_disconnect(client):
     except Exception as e:
         print(f"Failed to disconnect from MQTT broker. Error: {e}")
 
+def serial_disconnect(ser):
+    try:
+        ser.close()
+    except Exception as e:
+        print(f"Failed to disconnect from serial port. Error: {e}")
 
 # MQTT on_connect callback
 def on_connect(client, userdata, flags, rc):
@@ -133,7 +138,6 @@ def send_at_command(command, ser, timeout=10):
     response = ''
 
     try:
-        ser = serial.Serial('/dev/ttyUSB2', 115200, timeout=1)
         ser.write((command + '\r\n').encode())
         ser.flush()
 
@@ -151,9 +155,6 @@ def send_at_command(command, ser, timeout=10):
         print(f"Serial communication error: {str(e)}")
     except Exception as e:
         print(f"Unexpected error: {str(e)}")
-    finally:
-        if ser.is_open:
-            ser.close()
 
     return response
 
@@ -658,6 +659,9 @@ mqtt_connect(client, mqtt_broker, mqtt_port, mqtt_username, mqtt_password)
 
 # Register the mqtt_disconnect function to be called when the program exits
 atexit.register(mqtt_disconnect, client)
+
+# Register the serial_disconnect function to be called when the program exits
+atexit.register(serial_disconnect, ser)
 
 command_queue.put(('AT+QNWPREFCFG="lte_band"', ser, 10, process_lockedband_response))
 command_queue.put(('AT+QNWPREFCFG="nr5g_band"', ser, 10, process_lockedband_response))
