@@ -27,7 +27,7 @@ for section in config.sections():
                 identity_number = option.split('_')[0][8:]
                 attribute = option.split('_')[1]
                 value = config.get(section, option)
-                if identity_number not in data:
+                if identity_number not in identity:
                     identity[identity_number] = {}
                 identity[identity_number][attribute] = value
 
@@ -546,7 +546,7 @@ def update_cellular_info():
         command_queue.put(("AT+CNUM", ser, 10, None, process_phone_number_response))
 
         # Emit the latest modem mode
-        safe_socketio_emit('modem_mode', latest_status_values["usermode"])
+        #safe_socketio_emit('modem_mode', latest_status_values["usermode"])
 
         time.sleep(60)
 
@@ -678,16 +678,17 @@ def api_sms_route():
 @app.route('/api/select_identity', methods=['POST'])
 def select_identity():
     selected_identity = request.json.get('identity')
-    print(f"Selected identity: {selected_identity}")
-
-    if selected_identity in identity:
-        selected_imei = identity[selected_identity]['imei']
-        selected_apn = identity[selected_identity]['apn']
-        command = f'AT+EGMR=1,7,"{selected_imei}";+CFUN=1,1;+CGDCONT=1,"IP","{selected_apn}";+CGACT=1,1'
-        latest_status_values["identity"] = selected_identity
-        command_queue.put((command, ser, 10, None, process_identity_response))
-
-    return "Identity selection received"
+    
+    for key, identity_detail in identity.items():  # Iterating over key-value pairs in the identity dictionary
+        if identity_detail['name'] == selected_identity:
+            selected_imei = identity_detail['imei']
+            selected_apn = identity_detail['apn']
+            command = f'AT+EGMR=1,7,"{selected_imei}";+CFUN=1,1;+CGDCONT=1,"IP","{selected_apn}";+CGACT=1,1'
+            latest_status_values["identity"] = selected_identity
+            command_queue.put((command, ser, 10, None, process_identity_response))
+            return "Identity selection received" 
+    
+    return "No matching identity found", 404
 
 @socketio.on('connect')
 def handle_connect():
