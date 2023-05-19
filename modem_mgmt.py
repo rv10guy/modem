@@ -207,6 +207,57 @@ def get_carrier(mcc, mnc):
 def process_at_command(response):
     safe_socketio_emit('display_response', response)
 
+# Process AT+QSCAN response for available networks    
+def process_scan_response(response):
+    # split the response into lines
+    response_lines = response.strip().split('\n')
+    
+    # define the names of the data
+    data_names = ["network_type", "MCC", "MNC", "frequency", "Cell ID", "RSRP", "RSRQ", "srvlev", "squal", "cellID", "TAC", "Bandwidth", "Band"]
+    
+    # list to hold the results
+    result = []
+
+    # process each line
+    for line in response_lines:
+        if '+QSCAN:' in line:
+            # remove '+QSCAN:' and strip leading and trailing spaces
+            line = line.replace('+QSCAN:', '').strip()
+
+            # split the line by comma
+            line_values = line.split(',')
+
+            # create a dictionary with the data names as keys and the line values as values
+            full_data_dict = dict(zip(data_names, line_values))
+
+            # remove quotation marks from the network type
+            network_type = full_data_dict['network_type'].replace('"', '')
+
+            # create a new dictionary with only the desired fields
+            data_dict = {
+                "Carrier": get_carrier(full_data_dict['MCC'], full_data_dict['MNC']),
+                "Network Type": full_data_dict['network_type'],
+                "Band": int(full_data_dict['Band']),
+                "RSRP": int(full_data_dict['RSRP']),
+                "RSRQ": int(full_data_dict['RSRQ'])
+                
+            }
+           # check if data_dict already exists in result list
+            if str(data_dict) not in [str(d) for d in result]:
+                # add the dictionary to the result list
+                result.append(data_dict)
+
+    # Sort the result by "Carrier" and then by "Band"
+    result = sorted(result, key=lambda k: (k['Carrier'], k['Band']))
+
+    # emit the result to the client
+    print("Network scan complete.")
+    safe_socketio_emit('network_scan_result', result)
+
+    # when scan is done, emit a message to hide "Please wait..."
+    safe_socketio_emit('hide_overlay', room= "global")
+
+
 # Scan for available networks
 def perform_network_scan(scan_type):
     print("Performing network scan")
@@ -334,7 +385,7 @@ def process_apn_response(response):
 # Process Identity Response 
 def process_identity_response(response):
     safe_mqtt_publish("cellular/identity", latest_status_values["identity"], 0, True)
-    safe_socketio_emit('identity', latest_status_values["identity"]
+    safe_socketio_emit('identity', latest_status_values["identity"])
 
 # Process User Setting LTE Mode Response
 def process_mode_lte_response(response):
@@ -431,56 +482,6 @@ def process_phone_number_response(response):
     safe_socketio_emit("cellular/phone_number", phone_number, room= "global")
     safe_mqtt_publish("cellular/phone_number", phone_number, 0, True)
     latest_status_values["phone_number"] = phone_number
-
-# Process AT+QSCAN response for available networks    
-def process_scan_response(response):
-    # split the response into lines
-    response_lines = response.strip().split('\n')
-    
-    # define the names of the data
-    data_names = ["network_type", "MCC", "MNC", "frequency", "Cell ID", "RSRP", "RSRQ", "srvlev", "squal", "cellID", "TAC", "Bandwidth", "Band"]
-    
-    # list to hold the results
-    result = []
-
-    # process each line
-    for line in response_lines:
-        if '+QSCAN:' in line:
-            # remove '+QSCAN:' and strip leading and trailing spaces
-            line = line.replace('+QSCAN:', '').strip()
-
-            # split the line by comma
-            line_values = line.split(',')
-
-            # create a dictionary with the data names as keys and the line values as values
-            full_data_dict = dict(zip(data_names, line_values))
-
-            # remove quotation marks from the network type
-            network_type = full_data_dict['network_type'].replace('"', '')
-
-            # create a new dictionary with only the desired fields
-            data_dict = {
-                "Carrier": get_carrier(full_data_dict['MCC'], full_data_dict['MNC']),
-                "Network Type": full_data_dict['network_type'],
-                "Band": int(full_data_dict['Band']),
-                "RSRP": int(full_data_dict['RSRP']),
-                "RSRQ": int(full_data_dict['RSRQ'])
-                
-            }
-           # check if data_dict already exists in result list
-            if str(data_dict) not in [str(d) for d in result]:
-                # add the dictionary to the result list
-                result.append(data_dict)
-
-    # Sort the result by "Carrier" and then by "Band"
-    result = sorted(result, key=lambda k: (k['Carrier'], k['Band']))
-
-    # emit the result to the client
-    print("Network scan complete.")
-    safe_socketio_emit('network_scan_result', result)
-
-    # when scan is done, emit a message to hide "Please wait..."
-    safe_socketio_emit('hide_overlay', room= "global")
 
 def process_lockedband_response(response):
     # Initialize an empty dictionary to store the bands
