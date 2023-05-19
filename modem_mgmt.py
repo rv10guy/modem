@@ -389,38 +389,81 @@ def process_identity_response(response):
 
 # Process User Setting LTE Mode Response
 def process_mode_lte_response(response):
-    safe_mqtt_publish("cellular/usermode", "LTE", 0, True)
-    latest_status_values["usermode"] = "LTE"
+    safe_mqtt_publish("cellular/modem_mode", "LTE Only", 0, True)
+    latest_status_values["modem_mode"] = "LTE Only"
 
 # Process User Setting Auto-Auto Mode Response
 def process_mode_fullauto_response(response):
-    safe_mqtt_publish("cellular/usermode", "Full Auto", 0, True)
-    latest_status_values["usermode"] = "Full Auto"
+    safe_mqtt_publish("cellular/modem_mode", "Auto", 0, True)
+    latest_status_values["modem_mode"] = "Auto"
 
 # Process User Setting Auto-5GSA Mode Response
 def process_mode_auto_5gsa_response(response):
-    safe_mqtt_publish("cellular/usermode", "Auto - 5G SA", 0, True)
-    latest_status_values["usermode"] = "Auto - 5G SA"
+    safe_mqtt_publish("cellular/modem_mode", "Auto - 5G SA mode", 0, True)
+    latest_status_values["modem_mode"] = "Auto - 5G SA mode"
 
 # Process User Setting Auto-5GNSA Mode Response
 def process_mode_auto_5gnsa_response(response):
-    safe_mqtt_publish("cellular/usermode", "Auto - 5G NSA", 0, True)
-    latest_status_values["usermode"] = "Auto - 5G NSA"
+    safe_mqtt_publish("cellular/modem_mode", "Auto - 5G NSA mode", 0, True)
+    latest_status_values["modem_mode"] = "Auto - 5G NSA mode"
 
 # Process User Setting 5GSAOnly Mode Response
 def process_mode_5g_sa_response(response):
-    safe_mqtt_publish("cellular/usermode", "5G SA", 0, True)
-    latest_status_values["usermode"] = "5G SA"
+    safe_mqtt_publish("cellular/modem_mode", "5G Only SA mode", 0, True)
+    latest_status_values["modem_mode"] = "5G Only SA mode"
 
 # Process User Setting 5GNSAOnly Mode Response
 def process_mode_5g_nsa_response(response):
-    safe_mqtt_publish("cellular/usermode", "5G NSA", 0, True)
-    latest_status_values["usermode"] = "5G NSA"
+    safe_mqtt_publish("cellular/modem_mode", "5G Only NSA mode", 0, True)
+    latest_status_values["modem_mode"] = "5G Only NSA mode"
 
 # Process User Setting 5G Auto Mode Response
 def process_mode_5g_auto_response(response):
-    safe_mqtt_publish("cellular/usermode", "5G Auto", 0, True)
-    latest_status_values["usermode"] = "5G Auto"
+    safe_mqtt_publish("cellular/modem_mode", "5G Only Auto", 0, True)
+    latest_status_values["modem_mode"] = "5G Only Auto"
+
+def process_mode_response(response):
+    # Split the response into lines
+    lines = response.splitlines()
+
+    # Initialize the values
+    nr5g_disable_mode = None
+    mode_pref = None
+
+    # Iterate over the lines
+    for line in lines:
+        # If the line contains 'nr5g_disable_mode', extract the value
+        if 'nr5g_disable_mode' in line:
+            nr5g_disable_mode = line.split(',')[1].replace('"','').strip()
+
+        # If the line contains 'mode_pref', extract the value
+        elif 'mode_pref' in line:
+            mode_pref = line.split(',')[1].replace('"','').strip()
+
+    # Define the mapping
+    mode_mapping = {
+        ('0', 'AUTO'): 'Auto',
+        ('1', 'AUTO'): 'Auto - 5G NSA mode',
+        ('2', 'AUTO'): 'AUTO - 5G SA mode',
+        ('0', 'NR5G'): '5G Only Auto',
+        ('1', 'NR5G'): '5G Only NSA mode',
+        ('2', 'NR5G'): '5G Only SA mode',
+    }
+
+    # Get mode from mapping with a default value depending on mode_pref
+    if mode_pref in ['AUTO', 'NR5G']:
+        mode = mode_mapping.get((nr5g_disable_mode, mode_pref), None)
+    elif mode_pref == 'LTE':
+        mode = 'LTE Only'
+    elif mode_pref == 'WCDMA':
+        mode = '3G Only'
+    else:
+        mode = None
+
+    if mode is not None:
+        safe_socketio_emit('modem_mode', mode)
+        safe_mqtt_publish('cellular/modem_mode', mode, 0, True)
+        latest_status_values["modem_mode"] = mode
 
 # Process User Setting LTE Mode
 def modem_mode_lte():
@@ -545,8 +588,8 @@ def update_cellular_info():
         # Get phone number
         command_queue.put(("AT+CNUM", ser, 10, None, process_phone_number_response))
 
-        # Emit the latest modem mode
-        #safe_socketio_emit('modem_mode', latest_status_values["usermode"])
+        # Get modem mode
+        command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode";+QNWPREFCFG="mode_pref"', ser, 10, None, process_mode_response))
 
         time.sleep(60)
 
