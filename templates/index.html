@@ -71,14 +71,19 @@
                 <li>Latency: <span id="latency"></span></li>
                 <li>Last Speedtest: <span id="st-date-time"></span></li>
                 <button id="run-speedtest">Run Speed Test</button>
-                <button id="identity-1">Set Identity 1</button>
-                <button id="identity-2">Set Identity 2</button>
-                <button id="identity-3">Set Identity 3</button>
-                <button id="identity-4">Set Identity 4</button>
-
             </ul>
         </div>
         <hr>
+        <div class="Identity Selection">
+            <h1>Select an Identity</h1>
+            <form id="identityForm">
+                <label for="identitySelect">Choose an identity:</label>
+                <select id="identitySelect" name="identity">
+                </select>
+                <br>
+                <input type="submit" value="Submit">
+            </form>
+        </div>
         <div class="command-section">
             <h1>AT Command Interface</h1>
             <form id="command-form">
@@ -398,28 +403,47 @@
                 document.getElementById("st-date-time").textContent = dateTime;
             });
 
+            // Event listener for identity submission
+            document.getElementById("identityForm").addEventListener("submit", function(event) {
+                event.preventDefault(); // Prevent form submission
 
-            document.getElementById("identity-1").addEventListener("click", function() {
-                socket.emit("identity-1");
+                var selectedIdentity = document.getElementById("identitySelect").value;
+                console.log("Selected identity:", selectedIdentity);
+
+                // Send selected identity to the Python code
+                fetch('/api/select_identity', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        identity: selectedIdentity
+                    })
+                })
+                .then(response => {
+                    if (response.ok) {
+                        console.log("Identity selection sent successfully");
+                    } else {
+                        console.error("Failed to send identity selection");
+                    }
+                })
+                .catch(error => {
+                    console.error("Error occurred while sending identity selection:", error);
+                });
             });
 
-            document.getElementById("identity-2").addEventListener("click", function() {
-                socket.emit("identity-2");
+            socket.on('identity_names', function(identityNames) {
+                var selectElement = document.getElementById("identitySelect");
+
+                // Populate the select element with identity names
+                for (var i = 0; i < identityNames.length; i++) {
+                    var optionElement = document.createElement("option");
+                    optionElement.value = identityNames[i];
+                    optionElement.textContent = identityNames[i];
+                    selectElement.appendChild(optionElement);
+                }
             });
 
-            document.getElementById("identity-3").addEventListener("click", function() {
-                socket.emit("identity-3");
-            });
-
-            document.getElementById("identity-4").addEventListener("click", function() {
-                socket.emit("identity-4");
-            });
-
-            document.getElementById("run-speedtest").addEventListener("click", function() {
-                socket.emit("run_speedtest");
-            });
-
-        
             function selectAllCheckboxes(containerId, check) {
                 var container = document.getElementById(containerId);
                 var checkboxes = container.querySelectorAll("input[type='checkbox']");

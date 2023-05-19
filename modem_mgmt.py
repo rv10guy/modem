@@ -3,10 +3,12 @@ from flask_socketio import SocketIO, emit, join_room
 import serial, re, time, paho.mqtt.client as mqtt, threading, json, queue, speedtest, atexit, sys, logging, serial.tools.list_ports, configparser
 from serial import SerialException
 from datetime import datetime
+from flask_cors import CORS
 
 config = configparser.ConfigParser()
 config.read('modem_mgmt.ini')
 
+# Read config file
 flask_port = int(config.get('Flask', 'port', fallback=8080))
 flask_secret_key = config.get('Flask', 'secret_key', fallback='secret!')
 mqtt_broker = config.get('MQTT', 'broker')
@@ -16,9 +18,23 @@ mqtt_password = config.get('MQTT', 'password')
 modem_port = config.get('Modem', 'port', fallback=None)
 modem_baudrate = int(config.get('Modem','baudrate', fallback=115200))
 
+# Read Identities from config file
+identity = {}
+for section in config.sections():
+    if section == 'Identities':
+        for option in config.options(section):
+            if option.startswith('identity'):
+                identity_number = option.split('_')[0][8:]
+                attribute = option.split('_')[1]
+                value = config.get(section, option)
+                if identity_number not in data:
+                    identity[identity_number] = {}
+                identity[identity_number][attribute] = value
+
 # Flask setup
 app = Flask(__name__)
 app.config['SECRET_KEY'] = flask_secret_key
+CORS(app)
 #socketio = SocketIO(app, cors_allowed_origins="*")
 socketio = SocketIO(app, async_mode='gevent', websocket=True, engineio_logger=False, cors_allowed_origins="*")
 
@@ -315,29 +331,10 @@ def process_apn_response(response):
     safe_mqtt_publish("cellular/apn", apn, 0, True)
     latest_status_values["apn"] = apn
 
-# Process Identity Response 1    
-def process_identity1_response(response):
-    safe_mqtt_publish("cellular/identity", "1", 0, True)
-    latest_status_values["identity"] = 1
-    safe_socketio_emit('identity', "Identity 1")
-
-# Process Identity Response 2    
-def process_identity2_response(response):
-    safe_mqtt_publish("cellular/identity", "2", 0, True)
-    latest_status_values["identity"] = 2
-    safe_socketio_emit('identity', "Identity 2")
-
-# Process Identity Response 3
-def process_identity3_response(response):
-    safe_mqtt_publish("cellular/identity", "3", 0, True)
-    latest_status_values["identity"] = 3
-    safe_socketio_emit('identity', "Identity 3")
-
-# Process Identity Response 4
-def process_identity4_response(response):
-    safe_mqtt_publish("cellular/identity", "4", 0, True)
-    latest_status_values["identity"] = 4
-    safe_socketio_emit('identity', "Identity 4")
+# Process Identity Response 
+def process_identity_response(response):
+    safe_mqtt_publish("cellular/identity", latest_status_values["identity"], 0, True)
+    safe_socketio_emit('identity', latest_status_values["identity"]
 
 # Process User Setting LTE Mode Response
 def process_mode_lte_response(response):
@@ -376,37 +373,43 @@ def process_mode_5g_auto_response(response):
 
 # Process User Setting LTE Mode
 def modem_mode_lte():
-    command_queue.put(('AT', ser, 10, None, process_mode_lte_response))
+    command_queue.put(('AT+QNWPREFCFG="mode_pref",LTE', ser, 10, None, process_mode_lte_response))
     safe_socketio_emit('modem_mode', "LTE")
 
 # Process User Setting Full Auto Mode
 def modem_mode_fullauto():
-    command_queue.put(('AT', ser, 10, None, process_mode_fullauto_response))
+    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",1', ser, 10, None, None))
+    command_queue.put(('AT+QNWPREFCFG="mode_pref",AUTO', ser, 10, None, process_mode_fullauto_response))
     safe_socketio_emit('modem_mode', "Auto-Auto")
 
 # Process User Setting Auto - 5g SA Mode
 def modem_mode_auto_5gsa():
-    command_queue.put(('AT', ser, 10, None, process_mode_auto_5gnsa_response))
+    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",2', ser, 10, None, None))
+    command_queue.put(('AT+QNWPREFCFG="mode_pref",AUTO', ser, 10, None, process_mode_auto_5gsa_response))
     safe_socketio_emit('modem_mode', "Auto-5GSA")
 
 # Process User Setting Auto - 5g NSA Mode
 def modem_mode_auto_5gnsa():
-    command_queue.put(('AT', ser, 10, None, process_mode_auto_5gsa_response))
+    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",1', ser, 10, None, None))
+    command_queue.put(('AT+QNWPREFCFG="mode_pref",AUTO', ser, 10, None, process_mode_auto_5gnsa_response))
     safe_socketio_emit('modem_mode', "Auto-5GNSA")
 
 # Process User Setting 5G Auto Mode
 def modem_mode_5g_auto():
-    command_queue.put(('AT', ser, 10, None, process_mode_5g_auto_response))
+    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",0', ser, 10, None, None))
+    command_queue.put(('AT+QNWPREFCFG="mode_pref",NR5G', ser, 10, None, process_mode_5g_auto_response))
     safe_socketio_emit('modem_mode', "5G Auto")
 
 # Process User Setting 5G Only - SA Mode
 def modem_mode_5g_sa():
-    command_queue.put(('AT', ser, 10, None, process_mode_5g_sa_response))
+    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",2', ser, 10, None, None))
+    command_queue.put(('AT+QNWPREFCFG="mode_pref",NR5G', ser, 10, None, process_mode_5g_sa_response))
     safe_socketio_emit('modem_mode', "5G SA") 
 
 # Process User Setting 5G Only - NSA Mode
 def modem_mode_5g_nsa():
-    command_queue.put(('AT', ser, 10, None, process_mode_5g_nsa_response))
+    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",1', ser, 10, None, None))
+    command_queue.put(('AT+QNWPREFCFG="mode_pref",NR5G', ser, 10, None, process_mode_5g_nsa_response))
     safe_socketio_emit('modem_mode', "5G NSA")
 
 # Process the AT+COPS response for network operator
@@ -541,6 +544,9 @@ def update_cellular_info():
         # Get phone number
         command_queue.put(("AT+CNUM", ser, 10, None, process_phone_number_response))
 
+        # Emit the latest modem mode
+        safe_socketio_emit('modem_mode', latest_status_values["usermode"])
+
         time.sleep(60)
 
 def parse_date(date_str):
@@ -599,7 +605,7 @@ def get_sms(ser):
     command_queue.put(('AT+CMGL="ALL"', ser, 10, None, process_get_sms_response))
 
 def process_delete_sms_response(response):
-    # Existing code to delete an SMS message
+    
     return jsonify({"success": True})
 
 def delete_sms(id):
@@ -640,21 +646,47 @@ def handle_send_command(command):
     # Add the command to the queue for processing
     command_queue.put((command, ser, 10, None, process_at_command))
 
-@app.route('/api/sms', methods=['GET'])
-def get_sms_route():
-    messages = get_sms(ser)  # Call the existing get_sms function and pass ser as an argument
-    return jsonify(messages)
+#@app.route('/api/sms', methods=['GET'])
+#def get_sms_route():
+#    messages = get_sms(ser)  # Call the existing get_sms function and pass ser as an argument
+#    return jsonify(messages)
 
 @app.route('/api/sms/<int:id>', methods=['DELETE'])
 def delete_sms_route(id):
     result = delete_sms(id)
     get_sms_on_connect()
-    return result
+    return jsonify({"success": True})
 
-@app.route('/api/sms', methods=['POST'])
-def send_sms_route():
-    result = send_sms()
-    return result
+@app.route('/api/sms/', methods=['POST', 'OPTIONS'])
+def api_sms_route():
+    if request.method == 'OPTIONS':
+        # Pre-flight request. Reply successfully:
+        response = app.make_default_options_response()
+
+        # Allow the possibility of CORS
+        headers = response.headers
+        headers['Access-Control-Allow-Origin'] = '*'
+        headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        headers['Access-Control-Allow-Methods'] = 'OPTIONS, HEAD, GET, POST, DELETE, PUT'
+
+        return response
+    elif request.method == 'POST':
+        result = send_sms()
+        return result
+
+@app.route('/api/select_identity', methods=['POST'])
+def select_identity():
+    selected_identity = request.json.get('identity')
+    print(f"Selected identity: {selected_identity}")
+
+    if selected_identity in identity:
+        selected_imei = identity[selected_identity]['imei']
+        selected_apn = identity[selected_identity]['apn']
+        command = f'AT+EGMR=1,7,"{selected_imei}";+CFUN=1,1;+CGDCONT=1,"IP","{selected_apn}";+CGACT=1,1'
+        latest_status_values["identity"] = selected_identity
+        command_queue.put((command, ser, 10, None, process_identity_response))
+
+    return "Identity selection received"
 
 @socketio.on('connect')
 def handle_connect():
@@ -664,6 +696,16 @@ def handle_connect():
         print(f"Error joining room: {str(e)}")
 
     get_sms_on_connect()  # Call the get_sms_on_connect function when a client connects
+
+    identity_names = []
+    for identity_number, identity_data in identity.items():
+        if 'name' in identity_data:
+            identity_names.append(identity_data['name'])
+
+    try:
+        safe_socketio_emit('identity_names', identity_names, room="global")
+    except Exception as e:
+        print(f"Error while emitting identity_names event: {str(e)}")
 
     for status, value in latest_status_values.items():
         if not isinstance(status, str):
@@ -745,26 +787,6 @@ def handle_run_speedtest():
     safe_socketio_emit("speedtest_results", results, room = "global")
     latest_status_values[speedtest] = results
     print("Speedtest complete.")
-
-@socketio.on("identity-1")
-def handle_set_identity_1():
-    print("Setting Modem to Identity #1")
-    command_queue.put(('AT', ser, 10, None, process_identity1_response))
-
-@socketio.on("identity-2")
-def handle_set_identity_2():
-    print("Setting Modem to Identity #2")
-    command_queue.put(('AT', ser, 10, None, process_identity2_response))
-
-@socketio.on("identity-3")
-def handle_set_identity_3():
-    print("Setting Modem to Identity #3")
-    command_queue.put(('AT', ser, 10, None, process_identity3_response))
-
-@socketio.on("identity-4")
-def handle_set_identity_4():
-    print("Setting Modem to Identity #4")
-    command_queue.put(('AT', ser, 10, None, process_identity4_response))
 
 # Connect to the MQTT broker
 mqtt_connect(client, mqtt_broker, mqtt_port, mqtt_username, mqtt_password)
