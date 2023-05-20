@@ -17,6 +17,7 @@ mqtt_username = config.get('MQTT', 'username')
 mqtt_password = config.get('MQTT', 'password')
 modem_port = config.get('Modem', 'port', fallback=None)
 modem_baudrate = int(config.get('Modem','baudrate', fallback=115200))
+refresh_interval = int(config.get('Modem', 'refresh_interval', fallback=60))
 
 # Read Identities from config file
 identity = {}
@@ -263,11 +264,11 @@ def perform_network_scan(scan_type):
     print("Performing network scan")
     # send the appropriate AT command based on scan_type
     if scan_type == 'LTE':
-        command = "AT+QSCAN=1,1"  # replace with the correct AT command
+        command = "AT+QSCAN=1,1"  
     elif scan_type == '5G':
-        command = "AT+QSCAN=2,1"  # replace with the correct AT command
+        command = "AT+QSCAN=2,1"  
     elif scan_type == 'Both':
-        command = "AT+QSCAN=3,1"  # replace with the correct AT command
+        command = "AT+QSCAN=3,1"  
     else:
         return 'Invalid scan type'
     
@@ -350,6 +351,16 @@ def process_imei_response(response):
     safe_socketio_emit("cellular/imei", imei, room= "global")
     safe_mqtt_publish("cellular/imei", imei, 0, True)
     latest_status_values["imei"] = imei
+    for id, details in identity.items():
+        if details['imei'] == imei:
+            safe_socketio_emit("cellular/identity", details['name'], room= "global")
+            safe_mqtt_publish("cellular/identity", details['name'], 0, True)
+            latest_status_values["identity"] = details['name']
+            return
+    # if we get here, we didn't find a matching IMEI in the dictionary
+    safe_socketio_emit("cellular/identity", "Unknown", room= "global")
+    safe_mqtt_publish("cellular/identity", "Unknown", 0, True)
+    latest_status_values["identity"] = "Unknown"
 
 def format_iccid(raw_iccid):
     formatted_iccid = ""
@@ -385,7 +396,7 @@ def process_apn_response(response):
 # Process Identity Response 
 def process_identity_response(response):
     safe_mqtt_publish("cellular/identity", latest_status_values["identity"], 0, True)
-    safe_socketio_emit('identity', latest_status_values["identity"])
+    safe_socketio_emit("cellular/identity", latest_status_values["identity"], room="global")
 
 # Process User Setting LTE Mode Response
 def process_mode_lte_response(response):
@@ -444,7 +455,7 @@ def process_mode_response(response):
     mode_mapping = {
         ('0', 'AUTO'): 'Auto',
         ('1', 'AUTO'): 'Auto - 5G NSA mode',
-        ('2', 'AUTO'): 'AUTO - 5G SA mode',
+        ('2', 'AUTO'): 'Auto - 5G SA mode',
         ('0', 'NR5G'): '5G Only Auto',
         ('1', 'NR5G'): '5G Only NSA mode',
         ('2', 'NR5G'): '5G Only SA mode',
@@ -469,42 +480,56 @@ def process_mode_response(response):
 def modem_mode_lte():
     command_queue.put(('AT+QNWPREFCFG="mode_pref",LTE', ser, 10, None, process_mode_lte_response))
     safe_socketio_emit('modem_mode', "LTE")
+    safe_mqtt_publish('cellular/modem_mode', "LTE", 0, True)
+    latest_status_values["modem_mode"] = "LTE"
 
 # Process User Setting Full Auto Mode
 def modem_mode_fullauto():
     command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",1', ser, 10, None, None))
     command_queue.put(('AT+QNWPREFCFG="mode_pref",AUTO', ser, 10, None, process_mode_fullauto_response))
-    safe_socketio_emit('modem_mode', "Auto-Auto")
+    safe_socketio_emit('modem_mode', "Auto")
+    safe_mqtt_publish('cellular/modem_mode', "Auto", 0, True)
+    latest_status_values["modem_mode"] = "Auto"
 
 # Process User Setting Auto - 5g SA Mode
 def modem_mode_auto_5gsa():
     command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",2', ser, 10, None, None))
     command_queue.put(('AT+QNWPREFCFG="mode_pref",AUTO', ser, 10, None, process_mode_auto_5gsa_response))
-    safe_socketio_emit('modem_mode', "Auto-5GSA")
+    safe_socketio_emit('modem_mode', "Auto - 5G SA mode")
+    safe_mqtt_publish('cellular/modem_mode', "Auto - 5G SA mode", 0, True)
+    latest_status_values["modem_mode"] = "Auto - 5G SA mode"
 
 # Process User Setting Auto - 5g NSA Mode
 def modem_mode_auto_5gnsa():
     command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",1', ser, 10, None, None))
     command_queue.put(('AT+QNWPREFCFG="mode_pref",AUTO', ser, 10, None, process_mode_auto_5gnsa_response))
-    safe_socketio_emit('modem_mode', "Auto-5GNSA")
+    safe_socketio_emit('modem_mode', "Auto - 5G NSA mode")
+    safe_mqtt_publish('cellular/modem_mode', "Auto - 5G NSA mode", 0, True)
+    latest_status_values["modem_mode"] = "Auto - 5G NSA mode"
 
 # Process User Setting 5G Auto Mode
 def modem_mode_5g_auto():
     command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",0', ser, 10, None, None))
     command_queue.put(('AT+QNWPREFCFG="mode_pref",NR5G', ser, 10, None, process_mode_5g_auto_response))
-    safe_socketio_emit('modem_mode', "5G Auto")
+    safe_socketio_emit('modem_mode', "5G Only Auto")
+    safe_mqtt_publish('cellular/modem_mode', "5G Only Auto", 0, True)
+    latest_status_values["modem_mode"] = "5G Only Auto"
 
 # Process User Setting 5G Only - SA Mode
 def modem_mode_5g_sa():
     command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",2', ser, 10, None, None))
     command_queue.put(('AT+QNWPREFCFG="mode_pref",NR5G', ser, 10, None, process_mode_5g_sa_response))
-    safe_socketio_emit('modem_mode', "5G SA") 
+    safe_socketio_emit('modem_mode', "5G Only SA mode")
+    safe_mqtt_publish('cellular/modem_mode', "5G Only SA mode", 0, True)
+    latest_status_values["modem_mode"] = "5G Only SA mode" 
 
 # Process User Setting 5G Only - NSA Mode
 def modem_mode_5g_nsa():
     command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",1', ser, 10, None, None))
     command_queue.put(('AT+QNWPREFCFG="mode_pref",NR5G', ser, 10, None, process_mode_5g_nsa_response))
-    safe_socketio_emit('modem_mode', "5G NSA")
+    safe_socketio_emit('modem_mode', "5G Only NSA mode")
+    safe_mqtt_publish('cellular/modem_mode', "5G Only NSA mode", 0, True)
+    latest_status_values["modem_mode"] = "5G Only NSA mode"
 
 # Process the AT+COPS response for network operator
 def process_cops_response(response):
@@ -564,34 +589,37 @@ def process_lockedband_response(response):
         safe_mqtt_publish(topic, bands_string, 0, True)
         latest_status_values[band_type] = bands
 
-# Main loop to update cellular info every 60 seconds    
+def get_full_modem_status():
+    # Get & Process Current Band
+    command_queue.put(("AT+QNWINFO", ser, 10, None, process_qnwinfo_response))    
+
+    # Get signal strength and quality
+    command_queue.put(("AT+QCSQ", ser, 10, None, process_qcsq_response))
+
+    # Get ICCID
+    command_queue.put(("AT+CRSM=176,12258,0,0,10", ser, 10, None, process_iccid_response))
+
+    # Get IMEI
+    command_queue.put(("AT+GSN", ser, 10, None, process_imei_response))
+
+    # Get APN
+    command_queue.put(("AT+CGDCONT?", ser, 10, None, process_apn_response))
+
+    # Get network operator
+    command_queue.put(("AT+COPS?", ser, 10, None, process_cops_response))
+    
+    # Get phone number
+    command_queue.put(("AT+CNUM", ser, 10, None, process_phone_number_response))
+
+    # Get modem mode
+    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode";+QNWPREFCFG="mode_pref"', ser, 10, None, process_mode_response))
+
+# Main loop to update cellular info every refresh_interval seconds    
 def update_cellular_info():
     while True:
-        # Get & Process Current Band
-        command_queue.put(("AT+QNWINFO", ser, 10, None, process_qnwinfo_response))    
+        get_full_modem_status()
 
-        # Get signal strength and quality
-        command_queue.put(("AT+QCSQ", ser, 10, None, process_qcsq_response))
- 
-        # Get ICCID
-        command_queue.put(("AT+CRSM=176,12258,0,0,10", ser, 10, None, process_iccid_response))
-
-        # Get IMEI
-        command_queue.put(("AT+GSN", ser, 10, None, process_imei_response))
-
-        # Get APN
-        command_queue.put(("AT+CGDCONT?", ser, 10, None, process_apn_response))
-
-        # Get network operator
-        command_queue.put(("AT+COPS?", ser, 10, None, process_cops_response))
-        
-        # Get phone number
-        command_queue.put(("AT+CNUM", ser, 10, None, process_phone_number_response))
-
-        # Get modem mode
-        command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode";+QNWPREFCFG="mode_pref"', ser, 10, None, process_mode_response))
-
-        time.sleep(60)
+        time.sleep(refresh_interval)
 
 def parse_date(date_str):
     # Remove the leading comma
@@ -733,6 +761,23 @@ def select_identity():
     
     return "No matching identity found", 404
 
+@app.route('/api/select_mode', methods=['POST'])
+def select_mode():
+    selected_mode = request.json.get('mode')
+    print(f"Selected mode: {selected_mode}")
+    action_map = {
+        "LTE" : modem_mode_lte,
+        "Auto" : modem_mode_fullauto,
+        "Auto - 5G SA mode" : modem_mode_auto_5gsa,
+        "Auto - 5G NSA mode" : modem_mode_auto_5gnsa,
+        "5G Only SA mode" : modem_mode_5g_sa,
+        "5G Only NSA mode" : modem_mode_5g_nsa,
+        "5G Only Auto": modem_mode_5g_auto,
+    }
+    action=action_map.get(selected_mode, "Invalid mode")
+    action()
+    return "Mode selection received"
+
 @socketio.on('connect')
 def handle_connect():
     try:
@@ -789,8 +834,6 @@ def handle_selected_bands(selected_bands):
     
     command_queue.put(('AT+QNWPREFCFG="lte_band"', ser, 10, None, process_lockedband_response))
     command_queue.put(('AT+QNWPREFCFG="nr5g_band"', ser, 10, None, process_lockedband_response))
-    print("New band locking applied.")
-
 
 @socketio.on('network_scan')
 def handle_network_scan(scan_type):
@@ -799,20 +842,6 @@ def handle_network_scan(scan_type):
 
     # perform network scan based on scan_type
     perform_network_scan(scan_type)
-
-@socketio.on('mode')
-def handle_modem_mode(mode):
-    action_map = {
-        "LTE" : modem_mode_lte,
-        "Auto-Auto" : modem_mode_fullauto,
-        "Auto-SA" : modem_mode_auto_5gsa,
-        "Auto-NSA" : modem_mode_auto_5gnsa,
-        "5G-SA" : modem_mode_5g_sa,
-        "5G-NSA" : modem_mode_5g_nsa,
-        "5G-Auto": modem_mode_5g_auto,
-    }
-    action=action_map.get(mode, "Invalid mode")
-    action()
 
 @socketio.on('join')
 def on_join(data):
@@ -832,6 +861,12 @@ def handle_run_speedtest():
     safe_socketio_emit("speedtest_results", results, room = "global")
     latest_status_values[speedtest] = results
     print("Speedtest complete.")
+
+@socketio.on("manual_refresh")
+def handle_manual_refresh():
+    print("Manual Refresh Requested.")
+    get_full_modem_status()
+    print("Manual Refresh Complete.")
 
 # Connect to the MQTT broker
 mqtt_connect(client, mqtt_broker, mqtt_port, mqtt_username, mqtt_password)
