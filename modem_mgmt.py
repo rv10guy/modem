@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit, join_room 
-import serial, re, time, paho.mqtt.client as mqtt, threading, json, queue, speedtest, atexit, sys, logging, serial.tools.list_ports, configparser
+import serial, re, time, paho.mqtt.client as mqtt, threading, json, queue, speedtest, atexit, sys, logging, serial.tools.list_ports, configparser, socket, struct
 from serial import SerialException
 from datetime import datetime
 from flask_cors import CORS
@@ -15,8 +15,8 @@ mqtt_broker = config.get('MQTT', 'broker')
 mqtt_port = int(config.get('MQTT', 'port'))
 mqtt_username = config.get('MQTT', 'username')
 mqtt_password = config.get('MQTT', 'password')
-modem_port = config.get('Modem', 'port', fallback=None)
-modem_baudrate = int(config.get('Modem','baudrate', fallback=115200))
+modem_ip = config.get('Modem', 'ip', fallback='192.168.225.1')
+modem_port = int(config.get('Modem', 'port', fallback=1555))
 refresh_interval = int(config.get('Modem', 'refresh_interval', fallback=60))
 
 # Read Identities from config file
@@ -57,42 +57,10 @@ with open('mcc-mnc-list.json', 'r') as f:
 client= mqtt.Client()  
 latest_status_values = {}
 
-# Find the modem and configure it
-if modem_port == None:
-    print('Modem port not specified. Searching for modem...')
-    modem = None
-    for port in serial.tools.list_ports.comports():
-        if port.device.startswith('/dev/ttyUSB'):
-            try:
-                ser = serial.Serial(port.device, modem_baudrate)
-                # send a command to the modem to verify that it's the correct device
-                ser.write(b'AT\r\n')
-                response = b''
-                start_time = time.monotonic()
-                while not response.endswith(b'OK\r\n'):
-                    c = ser.read()
-                    response += c
-                    if time.monotonic() - start_time > 1:
-                        # timeout occurred, move on to next port
-                        break
-                if response.endswith(b'OK\r\n'):
-                    modem_port = port.device
-                    break
-                else:
-                    ser.close()
-            except serial.SerialException:
-                # could not open port, skip it
-                pass
-
-    if modem_port is None:
-        print('Modem not found.')
-    else:
-        print(f'Modem found on port {modem_port}.')
-else:
-    print(f'Modem port specified as {modem_port}.')
-    ser = serial.Serial(modem_port, baudrate=modem_baudrate)
-
-ser.reset_input_buffer()
+# Connect to the modem socket
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.settimeout(3)  # Set a timeout of 3 seconds
+sock.connect((modem_ip, modem_port))
 
 # Thread to setup the command queue
 command_queue = queue.Queue()
@@ -122,11 +90,11 @@ def mqtt_disconnect(client):
     except Exception as e:
         print(f"Failed to disconnect from MQTT broker. Error: {e}")
 
-def serial_disconnect(ser):
+def sock_disconnect(sock):
     try:
-        ser.close()
+        sock.close()
     except Exception as e:
-        print(f"Failed to disconnect from serial port. Error: {e}")
+        print(f"Failed to disconnect from Modem Socket. Error: {e}")
 
 # MQTT on_connect callback
 def on_connect(client, userdata, flags, rc):
@@ -151,33 +119,52 @@ def safe_mqtt_publish(topic, payload, qos=0, retain=False):
         print(f"Error while publishing MQTT message to topic '{topic}': {str(e)}")
         # Consider using a logging library to log the errors
 
-def send_at_command(command, ser, timeout=10, message=None):
-    response = ''
+def send_at_command(command, sock, timeout=10, message=None):
+    response = b''
 
     try:
+        command = (command + '\r\n').encode()
+        identifier_byte = b'\xa4'
+        length_bytes = struct.pack('>H', len(command))  # Big endian format
+        packet = identifier_byte + length_bytes + command + b'\r\n'
+
         if message:
-            ser.write((command + '\r\n').encode())
+            sock.sendall(packet)
             time.sleep(0.5)
-            ser.write(message.encode())
-            ser.write(chr(26).encode())
+            sock.sendall(message.encode())
+            sock.sendall(chr(26).encode())
         else:
-            ser.write((command + '\r\n').encode())
-            ser.flush()
+            sock.sendall(packet)
 
         end_time = time.time() + timeout
 
         while time.time() < end_time:
-            while ser.inWaiting() > 0:
-                response += ser.readline().decode()
+            try:
+                data = sock.recv(4096)
+                if not data:
+                    break
+                
+                identifier = data[0]
+                
+                if identifier == 0xa0:  # Command output
+                    response += data[3:]  # Skip identifier and length bytes
+                
+            except socket.timeout:
+                print("Socket timeout")
+                break
 
-            if response.endswith('OK\r\n') or response.endswith('ERROR\r\n'):
+            if response.endswith(b'OK\r\n') or response.endswith(b'ERROR\r\n'):
                 break
 
             time.sleep(0.1)  # short delay before the next read attempt
-    except serial.SerialException as e:
-        print(f"Serial communication error: {str(e)}")
+    except socket.error as e:
+        print(f"Socket communication error: {str(e)}")
     except Exception as e:
         print(f"Unexpected error: {str(e)}")
+
+    response = response.decode(errors='replace')
+    lines = response.splitlines()
+    response = "\n".join(line for line in lines if line.strip() and not line.strip() == 'OK')
 
     return response
 
@@ -185,10 +172,10 @@ def send_at_command(command, ser, timeout=10, message=None):
 def process_command_queue():
     while True:
         # get the next command from the queue
-        command, ser, timeout, message, callback = command_queue.get()
+        command, sock, timeout, message, callback = command_queue.get()
 
         # send the command and process the response
-        response = send_at_command(command, ser, timeout, message)
+        response = send_at_command(command, sock, timeout, message)
 
         # process the response here, e.g., by publishing to MQTT or updating the Flask server
         if callback:
@@ -272,8 +259,8 @@ def perform_network_scan(scan_type):
     else:
         return 'Invalid scan type'
     
-    # Put the command, process_scan_response function, ser, and timeout into the queue
-    command_queue.put((command, ser, 180, None, process_scan_response))
+    # Put the command, process_scan_response function, sock, and timeout into the queue
+    command_queue.put((command, sock, 180, None, process_scan_response))
     pass
 
 # Process the AT+QNWINFO response for current band and registration status
@@ -478,55 +465,55 @@ def process_mode_response(response):
 
 # Process User Setting LTE Mode
 def modem_mode_lte():
-    command_queue.put(('AT+QNWPREFCFG="mode_pref",LTE', ser, 10, None, process_mode_lte_response))
+    command_queue.put(('AT+QNWPREFCFG="mode_pref",LTE', sock, 10, None, process_mode_lte_response))
     safe_socketio_emit('modem_mode', "LTE")
     safe_mqtt_publish('cellular/modem_mode', "LTE", 0, True)
     latest_status_values["modem_mode"] = "LTE"
 
 # Process User Setting Full Auto Mode
 def modem_mode_fullauto():
-    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",1', ser, 10, None, None))
-    command_queue.put(('AT+QNWPREFCFG="mode_pref",AUTO', ser, 10, None, process_mode_fullauto_response))
+    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",1', sock, 10, None, None))
+    command_queue.put(('AT+QNWPREFCFG="mode_pref",AUTO', sock, 10, None, process_mode_fullauto_response))
     safe_socketio_emit('modem_mode', "Auto")
     safe_mqtt_publish('cellular/modem_mode', "Auto", 0, True)
     latest_status_values["modem_mode"] = "Auto"
 
 # Process User Setting Auto - 5g SA Mode
 def modem_mode_auto_5gsa():
-    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",2', ser, 10, None, None))
-    command_queue.put(('AT+QNWPREFCFG="mode_pref",AUTO', ser, 10, None, process_mode_auto_5gsa_response))
+    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",2', sock, 10, None, None))
+    command_queue.put(('AT+QNWPREFCFG="mode_pref",AUTO', sock, 10, None, process_mode_auto_5gsa_response))
     safe_socketio_emit('modem_mode', "Auto - 5G SA mode")
     safe_mqtt_publish('cellular/modem_mode', "Auto - 5G SA mode", 0, True)
     latest_status_values["modem_mode"] = "Auto - 5G SA mode"
 
 # Process User Setting Auto - 5g NSA Mode
 def modem_mode_auto_5gnsa():
-    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",1', ser, 10, None, None))
-    command_queue.put(('AT+QNWPREFCFG="mode_pref",AUTO', ser, 10, None, process_mode_auto_5gnsa_response))
+    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",1', sock, 10, None, None))
+    command_queue.put(('AT+QNWPREFCFG="mode_pref",AUTO', sock, 10, None, process_mode_auto_5gnsa_response))
     safe_socketio_emit('modem_mode', "Auto - 5G NSA mode")
     safe_mqtt_publish('cellular/modem_mode', "Auto - 5G NSA mode", 0, True)
     latest_status_values["modem_mode"] = "Auto - 5G NSA mode"
 
 # Process User Setting 5G Auto Mode
 def modem_mode_5g_auto():
-    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",0', ser, 10, None, None))
-    command_queue.put(('AT+QNWPREFCFG="mode_pref",NR5G', ser, 10, None, process_mode_5g_auto_response))
+    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",0', sock, 10, None, None))
+    command_queue.put(('AT+QNWPREFCFG="mode_pref",NR5G', sock, 10, None, process_mode_5g_auto_response))
     safe_socketio_emit('modem_mode', "5G Only Auto")
     safe_mqtt_publish('cellular/modem_mode', "5G Only Auto", 0, True)
     latest_status_values["modem_mode"] = "5G Only Auto"
 
 # Process User Setting 5G Only - SA Mode
 def modem_mode_5g_sa():
-    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",2', ser, 10, None, None))
-    command_queue.put(('AT+QNWPREFCFG="mode_pref",NR5G', ser, 10, None, process_mode_5g_sa_response))
+    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",2', sock, 10, None, None))
+    command_queue.put(('AT+QNWPREFCFG="mode_pref",NR5G', sock, 10, None, process_mode_5g_sa_response))
     safe_socketio_emit('modem_mode', "5G Only SA mode")
     safe_mqtt_publish('cellular/modem_mode', "5G Only SA mode", 0, True)
     latest_status_values["modem_mode"] = "5G Only SA mode" 
 
 # Process User Setting 5G Only - NSA Mode
 def modem_mode_5g_nsa():
-    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",1', ser, 10, None, None))
-    command_queue.put(('AT+QNWPREFCFG="mode_pref",NR5G', ser, 10, None, process_mode_5g_nsa_response))
+    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode",1', sock, 10, None, None))
+    command_queue.put(('AT+QNWPREFCFG="mode_pref",NR5G', sock, 10, None, process_mode_5g_nsa_response))
     safe_socketio_emit('modem_mode', "5G Only NSA mode")
     safe_mqtt_publish('cellular/modem_mode', "5G Only NSA mode", 0, True)
     latest_status_values["modem_mode"] = "5G Only NSA mode"
@@ -591,28 +578,28 @@ def process_lockedband_response(response):
 
 def get_full_modem_status():
     # Get & Process Current Band
-    command_queue.put(("AT+QNWINFO", ser, 10, None, process_qnwinfo_response))    
+    command_queue.put(("AT+QNWINFO", sock, 10, None, process_qnwinfo_response))    
 
     # Get signal strength and quality
-    command_queue.put(("AT+QCSQ", ser, 10, None, process_qcsq_response))
+    command_queue.put(("AT+QCSQ", sock, 10, None, process_qcsq_response))
 
     # Get ICCID
-    command_queue.put(("AT+CRSM=176,12258,0,0,10", ser, 10, None, process_iccid_response))
+    command_queue.put(("AT+CRSM=176,12258,0,0,10", sock, 10, None, process_iccid_response))
 
     # Get IMEI
-    command_queue.put(("AT+GSN", ser, 10, None, process_imei_response))
+    command_queue.put(("AT+GSN", sock, 10, None, process_imei_response))
 
     # Get APN
-    command_queue.put(("AT+CGDCONT?", ser, 10, None, process_apn_response))
+    command_queue.put(("AT+CGDCONT?", sock, 10, None, process_apn_response))
 
     # Get network operator
-    command_queue.put(("AT+COPS?", ser, 10, None, process_cops_response))
+    command_queue.put(("AT+COPS?", sock, 10, None, process_cops_response))
     
     # Get phone number
-    command_queue.put(("AT+CNUM", ser, 10, None, process_phone_number_response))
+    command_queue.put(("AT+CNUM", sock, 10, None, process_phone_number_response))
 
     # Get modem mode
-    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode";+QNWPREFCFG="mode_pref"', ser, 10, None, process_mode_response))
+    command_queue.put(('AT+QNWPREFCFG="nr5g_disable_mode";+QNWPREFCFG="mode_pref"', sock, 10, None, process_mode_response))
 
 # Main loop to update cellular info every refresh_interval seconds    
 def update_cellular_info():
@@ -672,9 +659,9 @@ def process_get_sms_response(response):
 
     return decoded_messages
 
-def get_sms(ser):
-    command_queue.put(("AT+CMGF=1", ser, 10, None, None))
-    command_queue.put(('AT+CMGL="ALL"', ser, 10, None, process_get_sms_response))
+def get_sms(sock):
+    command_queue.put(("AT+CMGF=1", sock, 10, None, None))
+    command_queue.put(('AT+CMGL="ALL"', sock, 10, None, process_get_sms_response))
 
 def process_delete_sms_response(response):
     
@@ -683,7 +670,7 @@ def process_delete_sms_response(response):
 def delete_sms(id):
     # Existing code to delete an SMS message
     command = f'AT+CMGD={id}'  # Replace with the appropriate AT command for deleting an SMS message by index
-    command_queue.put((command, ser, 10, None, process_delete_sms_response))
+    command_queue.put((command, sock, 10, None, process_delete_sms_response))
 
 def process_sms_response(response):
     if 'OK' in response:
@@ -693,7 +680,7 @@ def process_sms_response(response):
         return jsonify({"success": False, "error": response}), 500
 
 def send_sms():
-    command_queue.put(("AT+CMGF=1", ser, 10, None, None))
+    command_queue.put(("AT+CMGF=1", sock, 10, None, None))
     number = request.json.get('number')
     message = request.json.get('message')
 
@@ -701,12 +688,12 @@ def send_sms():
     command = f'AT+CMGS="{number}"'
 
     # Add the command to the queue with the message
-    command_queue.put((command, ser, 10, message, process_sms_response))
+    command_queue.put((command, sock, 10, message, process_sms_response))
     return jsonify({"success": True})
 
 
 def get_sms_on_connect():
-    messages = get_sms(ser)  # Call the existing get_sms function and pass ser as an argument
+    messages = get_sms(sock)  # Call the existing get_sms function and pass sock as an argument
 
 
 @app.route('/')
@@ -716,12 +703,7 @@ def index():
 @socketio.on('send_command')
 def handle_send_command(command):
     # Add the command to the queue for processing
-    command_queue.put((command, ser, 10, None, process_at_command))
-
-#@app.route('/api/sms', methods=['GET'])
-#def get_sms_route():
-#    messages = get_sms(ser)  # Call the existing get_sms function and pass ser as an argument
-#    return jsonify(messages)
+    command_queue.put((command, sock, 10, None, process_at_command))
 
 @app.route('/api/sms/<int:id>', methods=['DELETE'])
 def delete_sms_route(id):
@@ -756,7 +738,7 @@ def select_identity():
             selected_apn = identity_detail['apn']
             command = f'AT+EGMR=1,7,"{selected_imei}";+CFUN=1,1;+CGDCONT=1,"IP","{selected_apn}";+CGACT=1,1'
             latest_status_values["identity"] = selected_identity
-            command_queue.put((command, ser, 10, None, process_identity_response))
+            command_queue.put((command, sock, 10, None, process_identity_response))
             return "Identity selection received" 
     
     return "No matching identity found", 404
@@ -826,14 +808,14 @@ def handle_selected_bands(selected_bands):
 
         # Add the command to the queue
         if band_type == "lte_band":
-            command_queue.put((at_command, ser, 10, None, process_lockedband_response))
+            command_queue.put((at_command, sock, 10, None, process_lockedband_response))
         elif band_type == "nr5g_band":
-            command_queue.put((at_command, ser, 10, None, process_lockedband_response))
+            command_queue.put((at_command, sock, 10, None, process_lockedband_response))
             at_command2 = f'AT+QNWPREFCFG="nsa_nr5g_band",{bands_string}'
-            command_queue.put((at_command2, ser, 10, None, process_lockedband_response)) 
+            command_queue.put((at_command2, sock, 10, None, process_lockedband_response)) 
     
-    command_queue.put(('AT+QNWPREFCFG="lte_band"', ser, 10, None, process_lockedband_response))
-    command_queue.put(('AT+QNWPREFCFG="nr5g_band"', ser, 10, None, process_lockedband_response))
+    command_queue.put(('AT+QNWPREFCFG="lte_band"', sock, 10, None, process_lockedband_response))
+    command_queue.put(('AT+QNWPREFCFG="nr5g_band"', sock, 10, None, process_lockedband_response))
 
 @socketio.on('network_scan')
 def handle_network_scan(scan_type):
@@ -875,10 +857,10 @@ mqtt_connect(client, mqtt_broker, mqtt_port, mqtt_username, mqtt_password)
 atexit.register(mqtt_disconnect, client)
 
 # Register the serial_disconnect function to be called when the program exits
-atexit.register(serial_disconnect, ser)
+atexit.register(sock_disconnect, sock)
 
-command_queue.put(('AT+QNWPREFCFG="lte_band"', ser, 10, None, process_lockedband_response))
-command_queue.put(('AT+QNWPREFCFG="nr5g_band"', ser, 10, None, process_lockedband_response))
+command_queue.put(('AT+QNWPREFCFG="lte_band"', sock, 10, None, process_lockedband_response))
+command_queue.put(('AT+QNWPREFCFG="nr5g_band"', sock, 10, None, process_lockedband_response))
 
 command_queue_thread = threading.Thread(target=process_command_queue)
 command_queue_thread.daemon = True
